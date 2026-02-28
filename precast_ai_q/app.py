@@ -4,7 +4,8 @@ import streamlit as st
 
 from fitness import estimate_cost, fitness_function
 from qpso_optimizer import QPSO
-from strength_model import predict_strength, predict_strength_curve, train_strength_model
+from self_learning import SelfLearningLayer
+from strength_model import predict_strength, train_strength_model
 
 st.set_page_config(page_title="PrecastAI-Q Prototype", layout="wide")
 st.title("PrecastAI-Q Prototype")
@@ -16,8 +17,37 @@ def load_model():
     return train_strength_model()
 
 
+@st.cache_resource
+def load_learning_layer():
+    return SelfLearningLayer()
+
+
 strength_bundle = load_model()
+learning_layer = load_learning_layer()
 curing_types = strength_bundle["curing_types"]
+
+
+def adaptive_predict(cement, water_cement_ratio, admixture, temperature, humidity, curing_type, time_hours):
+    base_prediction = predict_strength(
+        bundle=strength_bundle,
+        cement=cement,
+        water_cement_ratio=water_cement_ratio,
+        admixture=admixture,
+        temperature=temperature,
+        humidity=humidity,
+        curing_type=curing_type,
+        time_hours=time_hours,
+    )
+    return learning_layer.predict(
+        base_prediction=base_prediction,
+        cement=cement,
+        water_cement_ratio=water_cement_ratio,
+        admixture=admixture,
+        temperature=temperature,
+        humidity=humidity,
+        time_hours=time_hours,
+        curing_type=curing_type,
+    )
 
 
 def energy_kwh_per_element(curing_type, temperature):
@@ -61,6 +91,58 @@ def risk_band(score):
 with st.expander("Model Training Info", expanded=False):
     st.write(f"Train score (R²): {strength_bundle['train_score']:.3f}")
     st.write(f"Test score (R²): {strength_bundle['test_score']:.3f}")
+
+st.subheader("Self-Learning Model (Reinforcement Learning Layer)")
+st.caption("Self-evolving production intelligence: feedback from actual production continuously updates correction weights.")
+
+learning_summary = learning_layer.get_summary()
+sl1, sl2, sl3 = st.columns(3)
+sl1.metric("Feedback cycles learned", f"{learning_summary['updates_count']}")
+sl2.metric("MAE before learning", f"{learning_summary['mae_before']:.2f}")
+sl3.metric("MAE after learning", f"{learning_summary['mae_after']:.2f}")
+
+with st.expander("Log Actual Production Feedback", expanded=False):
+    fb1, fb2, fb3 = st.columns(3)
+    with fb1:
+        fb_cement = st.number_input("Feedback Cement (kg/m³)", min_value=250.0, max_value=600.0, value=400.0, step=1.0)
+        fb_wc = st.number_input("Feedback W/C ratio", min_value=0.25, max_value=0.80, value=0.45, step=0.01)
+        fb_admixture = st.number_input("Feedback Admixture (%)", min_value=0.0, max_value=4.0, value=1.2, step=0.1)
+    with fb2:
+        fb_temp = st.number_input("Feedback Temperature (°C)", min_value=10.0, max_value=90.0, value=30.0, step=1.0)
+        fb_humidity = st.number_input("Feedback Humidity (%)", min_value=20.0, max_value=100.0, value=60.0, step=1.0)
+        fb_time = st.number_input("Feedback Time (hours)", min_value=2.0, max_value=48.0, value=8.0, step=1.0)
+    with fb3:
+        fb_curing = st.selectbox("Feedback Curing Type", options=curing_types, index=0)
+        fb_actual_strength = st.number_input("Actual Measured Strength (MPa)", min_value=1.0, max_value=100.0, value=22.0, step=0.1)
+
+    if st.button("Update Self-Learning Weights"):
+        predicted_before = adaptive_predict(
+            cement=fb_cement,
+            water_cement_ratio=fb_wc,
+            admixture=fb_admixture,
+            temperature=fb_temp,
+            humidity=fb_humidity,
+            curing_type=fb_curing,
+            time_hours=fb_time,
+        )
+
+        update_result = learning_layer.update(
+            cement=fb_cement,
+            water_cement_ratio=fb_wc,
+            admixture=fb_admixture,
+            temperature=fb_temp,
+            humidity=fb_humidity,
+            time_hours=fb_time,
+            curing_type=fb_curing,
+            predicted_strength=predicted_before,
+            actual_strength=fb_actual_strength,
+        )
+
+        st.success("Learning update applied. Model correction weights have been updated from this production cycle.")
+        f1, f2, f3 = st.columns(3)
+        f1.metric("Predicted before update", f"{update_result['predicted_before']:.2f} MPa")
+        f2.metric("Predicted after update", f"{update_result['predicted_after']:.2f} MPa")
+        f3.metric("Actual strength", f"{update_result['actual']:.2f} MPa")
 
 st.subheader("Baseline Input")
 col1, col2, col3 = st.columns(3)
@@ -146,6 +228,7 @@ if st.button("Run QPSO Optimization", type="primary"):
                 required_strength,
                 temperature_delta=temperature_delta,
                 labour_availability=labour_availability,
+                predictor=adaptive_predict,
             )
 
         optimizer = QPSO(
@@ -158,8 +241,7 @@ if st.button("Run QPSO Optimization", type="primary"):
         )
 
         solution, score = optimizer.optimize()
-        predicted = predict_strength(
-            bundle=strength_bundle,
+        predicted = adaptive_predict(
             cement=solution[0],
             water_cement_ratio=solution[1],
             admixture=solution[2],
@@ -195,8 +277,7 @@ if st.button("Run QPSO Optimization", type="primary"):
             f"Using '{baseline_curing_effective}' for baseline comparison."
         )
 
-    baseline_strength = predict_strength(
-        bundle=strength_bundle,
+    baseline_strength = adaptive_predict(
         cement=base_cement,
         water_cement_ratio=base_wc,
         admixture=base_admixture,
@@ -276,31 +357,31 @@ if st.button("Run QPSO Optimization", type="primary"):
     st.subheader("Predicted Strength Curve")
     time_points = np.arange(4, 25, 1)
 
-    baseline_curve = predict_strength_curve(
-        bundle=strength_bundle,
-        fixed_params={
-            "cement": base_cement,
-            "water_cement_ratio": base_wc,
-            "admixture": base_admixture,
-            "temperature": min(90.0, base_temp + temperature_delta),
-            "humidity": base_humidity,
-        },
-        curing_type=baseline_curing_effective,
-        time_points=time_points,
-    )
+    baseline_curve = [
+        adaptive_predict(
+            cement=base_cement,
+            water_cement_ratio=base_wc,
+            admixture=base_admixture,
+            temperature=min(90.0, base_temp + temperature_delta),
+            humidity=base_humidity,
+            curing_type=baseline_curing_effective,
+            time_hours=float(hour),
+        )
+        for hour in time_points
+    ]
 
-    optimized_curve = predict_strength_curve(
-        bundle=strength_bundle,
-        fixed_params={
-            "cement": best["cement"],
-            "water_cement_ratio": best["water_cement_ratio"],
-            "admixture": best["admixture"],
-            "temperature": best["effective_temperature"],
-            "humidity": best["humidity"],
-        },
-        curing_type=best["curing_type"],
-        time_points=time_points,
-    )
+    optimized_curve = [
+        adaptive_predict(
+            cement=best["cement"],
+            water_cement_ratio=best["water_cement_ratio"],
+            admixture=best["admixture"],
+            temperature=best["effective_temperature"],
+            humidity=best["humidity"],
+            curing_type=best["curing_type"],
+            time_hours=float(hour),
+        )
+        for hour in time_points
+    ]
 
     curve_df = pd.DataFrame(
         {
@@ -471,20 +552,3 @@ if enable_esg:
         st.success("Steam curing reduction detected: ESG impact improved.")
 
 
-st.subheader("Phased Implementation Strategy")
-p1, p2, p3 = st.columns(3)
-with p1:
-    st.markdown("**Phase 1 → Pilot Yard (0-3 months)**")
-    st.markdown("- Deploy dashboard in one yard")
-    st.markdown("- Validate strength prediction and cycle KPIs")
-    st.markdown("- Train supervisors and QC team")
-with p2:
-    st.markdown("**Phase 2 → Multi-Yard Rollout (3-9 months)**")
-    st.markdown("- Replicate model to additional yards")
-    st.markdown("- Benchmark ROI, risk, and ESG across locations")
-    st.markdown("- Standardize best curing playbooks")
-with p3:
-    st.markdown("**Phase 3 → ERP Integration (9-15 months)**")
-    st.markdown("- Integrate with production planning/ERP")
-    st.markdown("- Automate scheduling and procurement signals")
-    st.markdown("- Enable executive-level portfolio analytics")

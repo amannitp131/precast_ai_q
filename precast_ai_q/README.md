@@ -26,7 +26,10 @@ Build a demo prototype that predicts concrete strength and optimizes curing stra
 - ESG impact estimates:
    - annual energy savings
    - annual CO₂ reduction (tons)
-- Phased implementation strategy (Pilot → Multi-yard → ERP)
+- Self-learning reinforcement layer:
+   - compares predicted vs actual production strength
+   - updates correction weights after each cycle
+   - improves forecast accuracy over time
 
 All outputs are simulated using `data/sample_production_data.csv`.
 
@@ -40,6 +43,7 @@ precast_ai_q/
 ├── strength_model.py
 ├── qpso_optimizer.py
 ├── fitness.py
+├── self_learning.py
 ├── app.py
 ├── requirements.txt
 └── README.md
@@ -76,7 +80,11 @@ precast_ai_q/
    - interactive ROI calculator
    - production risk score indicator
    - ESG sustainability estimator
-   - phased implementation roadmap
+
+### Step 6: Self-learning layer
+- `self_learning.py` implements error-driven online updates.
+- After each production cycle, predicted vs actual strength is logged.
+- Correction weights are updated and reused in next optimization runs.
 
 ## 4) Starter Python code for key parts
 
@@ -112,4 +120,4 @@ precast_ai_q/
 - Show ROI numbers and payback timeline
 - Show production risk score color shift (baseline vs optimized)
 - Show annual CO₂ reduction in ESG mode
-- Close with phased implementation plan
+- Show self-learning update after one actual cycle entry

@@ -20,21 +20,33 @@ def fitness_function(
     required_strength=20.0,
     temperature_delta=0.0,
     labour_availability=1.0,
+    predictor=None,
 ):
     cement, wc_ratio, admixture, temp, humidity, time_hours = params
     effective_temp = temp + temperature_delta
     safe_labour = max(0.5, min(1.2, labour_availability))
 
-    predicted_strength = predict_strength(
-        bundle=strength_bundle,
-        cement=cement,
-        water_cement_ratio=wc_ratio,
-        admixture=admixture,
-        temperature=effective_temp,
-        humidity=humidity,
-        curing_type=curing_type,
-        time_hours=time_hours,
-    )
+    if predictor is None:
+        predicted_strength = predict_strength(
+            bundle=strength_bundle,
+            cement=cement,
+            water_cement_ratio=wc_ratio,
+            admixture=admixture,
+            temperature=effective_temp,
+            humidity=humidity,
+            curing_type=curing_type,
+            time_hours=time_hours,
+        )
+    else:
+        predicted_strength = predictor(
+            cement=cement,
+            water_cement_ratio=wc_ratio,
+            admixture=admixture,
+            temperature=effective_temp,
+            humidity=humidity,
+            curing_type=curing_type,
+            time_hours=time_hours,
+        )
 
     if predicted_strength < required_strength:
         shortfall = required_strength - predicted_strength
