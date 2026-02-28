@@ -13,7 +13,7 @@ st.caption("AI strength prediction + QPSO optimization for demo-ready precast st
 
 @st.cache_resource
 def load_model():
-    return train_strength_model("data/sample_production_data.csv")
+    return train_strength_model()
 
 
 strength_bundle = load_model()

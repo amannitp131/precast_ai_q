@@ -24,8 +24,31 @@ def _encode_features(frame: pd.DataFrame, feature_columns: list[str] | None = No
     return aligned
 
 
+def _resolve_data_path(data_path: str) -> Path:
+    candidate = Path(data_path)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+
+    if candidate.exists():
+        return candidate.resolve()
+
+    module_dir = Path(__file__).resolve().parent
+    module_relative = module_dir / data_path
+    if module_relative.exists():
+        return module_relative
+
+    project_relative = module_dir.parent / data_path
+    if project_relative.exists():
+        return project_relative
+
+    raise FileNotFoundError(
+        f"Could not locate dataset '{data_path}'. Checked: "
+        f"'{candidate}', '{module_relative}', '{project_relative}'."
+    )
+
+
 def train_strength_model(data_path: str = "data/sample_production_data.csv", random_state: int = 42) -> dict:
-    csv_path = Path(data_path)
+    csv_path = _resolve_data_path(data_path)
     data = pd.read_csv(csv_path)
 
     x = _encode_features(data)
